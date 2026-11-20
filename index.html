@@ -46,11 +46,16 @@ document.getElementById("open").href = "https://map.naver.com/p/search/" + encod
 
 const s = document.createElement("script");
 s.src = "https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=" + NCP_KEY_ID + "&submodules=panorama";
-s.onload = init;
+s.onload = () => {
+  try { init(); }
+  catch (e) { msg("거리뷰 오류: " + e.message + " → 지도"); try { showMap(); } catch (e2) { msg("지도 오류: " + e2.message); } }
+};
 s.onerror = () => msg("네이버 지도 API를 불러오지 못했습니다(키·서비스 URL 확인)");
 document.head.appendChild(s);
 
 function msg(t) { document.getElementById("msg").textContent = t; }
+window.navermap_authFailure = () => msg("네이버 인증 실패: Client ID·Web 서비스 URL 확인");
+window.addEventListener("error", (e) => msg("오류: " + e.message));
 
 function bearing(a, b) {   // a→b 방위각(도)
   const r = Math.PI / 180, y1 = a.lat() * r, y2 = b.lat() * r, dx = (b.lng() - a.lng()) * r;
@@ -81,12 +86,14 @@ document.getElementById("toggle").onclick = () => (showing === "pano" ? showMap(
 
 function init() {
   if (isNaN(lat) || isNaN(lng)) { msg("좌표 없음"); return; }
+  let done = false;
+  setTimeout(() => { if (!done) { msg("거리뷰 응답 없음 → 지도"); showMap(); } }, 8000);
+  if (!naver.maps.Panorama) throw new Error("Panorama 모듈 없음");
   const target = new naver.maps.LatLng(lat, lng);
   const pano = new naver.maps.Panorama("pano", {
     position: target, pov: { pan: 0, tilt: -5, fov: 100 },
     flightSpot: false, zoomControl: true
   });
-  let done = false;
   naver.maps.Event.addListener(pano, "pano_changed", () => {
     if (done) return;
     const loc = pano.getLocation && pano.getLocation();
@@ -105,7 +112,6 @@ function init() {
   naver.maps.Event.addListener(pano, "pano_status", (status) => {
     if (status === "ERROR") { msg("근처 거리뷰 없음 → 지도"); showMap(); }
   });
-  setTimeout(() => { if (!done) { msg("거리뷰 응답 없음 → 지도"); showMap(); } }, 8000);
 }
 
 function distance(a, b) {
