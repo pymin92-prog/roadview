@@ -46,9 +46,20 @@ document.getElementById("open").href = "https://map.naver.com/p/search/" + encod
 
 const s = document.createElement("script");
 s.src = "https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=" + NCP_KEY_ID + "&submodules=panorama";
-s.onload = () => {
+function start() {
   try { init(); }
   catch (e) { msg("거리뷰 오류: " + e.message + " → 지도"); try { showMap(); } catch (e2) { msg("지도 오류: " + e2.message); } }
+}
+let started = false;
+function startOnce() { if (!started) { started = true; start(); } }
+s.onload = () => {
+  // 서브모듈(panorama)은 본체 로드 후 비동기로 붙음 → 다 붙은 뒤 시작
+  if (naver.maps.Panorama) { startOnce(); return; }
+  naver.maps.onJSContentLoaded = startOnce;
+  let tries = 0;
+  const t = setInterval(() => {            // 콜백이 안 오는 경우 대비
+    if (naver.maps.Panorama || ++tries > 50) { clearInterval(t); startOnce(); }
+  }, 100);
 };
 s.onerror = () => msg("네이버 지도 API를 불러오지 못했습니다(키·서비스 URL 확인)");
 document.head.appendChild(s);
