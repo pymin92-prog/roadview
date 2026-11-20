@@ -34,18 +34,21 @@ const NCP_KEY_ID = "i5jno9udwc";   // 네이버 클라우드 Maps 애플리케�
 const KEY_PARAM = "ncpKeyId";                 // 예전 키(AI·NAVER API Maps)면 "ncpClientId" 로
 const ADDR_PREFIX = "경기도 광주시 추자동";
 const SEARCH_RADIUS_M = 150;                  // 이 거리 안에 거리뷰가 없으면 지도로 전환
+const AUTO_OPEN_NAVER = true;                 // 거리뷰 찾으면 네이버지도(거리뷰 켜진 상태)로 자동 이동
 // ================
 
 const q = new URLSearchParams(location.search);
-const lat = parseFloat(q.get("lat")), lng = parseFloat(q.get("lng"));
+let lat = parseFloat(q.get("lat")), lng = parseFloat(q.get("lng"));
 const jb = q.get("jb") || "";
 const no = q.get("no") || "";
 const addr = `${ADDR_PREFIX} ${jb}`.trim();
 document.getElementById("title").textContent = (no ? no + ". " : "") + addr;
-document.getElementById("open").href = "https://map.naver.com/p/search/" + encodeURIComponent(addr);
+const NAVER_BASE = "https://map.naver.com/p/search/" + encodeURIComponent(addr);
+document.getElementById("open").href = NAVER_BASE;
+const stay = q.get("stay") === "1";          // ?stay=1 이면 자동 이동 안 함(점검용)
 
 const s = document.createElement("script");
-s.src = "https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=" + NCP_KEY_ID + "&submodules=panorama";
+s.src = "https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=" + NCP_KEY_ID + "&submodules=panorama,geocoder";
 function start() {
   try { init(); }
   catch (e) { msg("거리뷰 오류: " + e.message + " → 지도"); try { showMap(); } catch (e2) { msg("지도 오류: " + e2.message); } }
@@ -54,11 +57,11 @@ let started = false;
 function startOnce() { if (!started) { started = true; start(); } }
 s.onload = () => {
   // 서브모듈(panorama)은 본체 로드 후 비동기로 붙음 → 다 붙은 뒤 시작
-  if (naver.maps.Panorama) { startOnce(); return; }
+  if (naver.maps.Panorama && naver.maps.Service) { startOnce(); return; }
   naver.maps.onJSContentLoaded = startOnce;
   let tries = 0;
   const t = setInterval(() => {            // 콜백이 안 오는 경우 대비
-    if (naver.maps.Panorama || ++tries > 50) { clearInterval(t); startOnce(); }
+    if ((naver.maps.Panorama && naver.maps.Service) || ++tries > 50) { clearInterval(t); startOnce(); }
   }, 100);
 };
 s.onerror = () => msg("네이버 지도 API를 불러오지 못했습니다(키·서비스 URL 확인)");
@@ -96,7 +99,22 @@ function showPano() {
 document.getElementById("toggle").onclick = () => (showing === "pano" ? showMap() : showPano());
 
 function init() {
-  if (isNaN(lat) || isNaN(lng)) { msg("좌표 없음"); return; }
+  if (!isNaN(lat) && !isNaN(lng)) { openPano(); return; }
+  if (!naver.maps.Service) { msg("좌표 없음(지오코더 모듈 없음)"); return; }
+  msg("주소로 위치 찾는 중…");
+  naver.maps.Service.geocode({ query: addr }, (status, res) => {
+    const a = res && res.v2 && res.v2.addresses && res.v2.addresses[0];
+    if (status !== naver.maps.Service.Status.OK || !a) {
+      msg("주소 검색 실패 → 네이버지도에서 열기를 눌러주세요");
+      return;
+    }
+    lat = parseFloat(a.y); lng = parseFloat(a.x);
+    msg(`위치 찾음 (${lat.toFixed(5)}, ${lng.toFixed(5)}) → 거리뷰 찾는 중…`);
+    openPano();
+  });
+}
+
+function openPano() {
   let done = false;
   setTimeout(() => { if (!done) { msg("거리뷰 응답 없음 → 지도"); showMap(); } }, 8000);
   if (!naver.maps.Panorama) throw new Error("Panorama 모듈 없음");
@@ -105,10 +123,11 @@ function init() {
     position: target, pov: { pan: 0, tilt: -5, fov: 100 },
     flightSpot: false, zoomControl: true
   });
-  naver.maps.Event.addListener(pano, "pano_changed", () => {
+  const onReady = () => {
     if (done) return;
     const loc = pano.getLocation && pano.getLocation();
-    const at = (loc && loc.coord) || pano.getPosition();
+    const at = (loc && loc.coord) || (pano.getPosition && pano.getPosition());
+    console.log("[roadview] 거리뷰 위치", loc, at);
     if (!at) return;
     done = true;
     const dist = distance(at, target);
@@ -117,11 +136,25 @@ function init() {
       showMap();
       return;
     }
-    pano.setPov({ pan: bearing(at, target), tilt: -5, fov: 100 });
+    const pan = Math.round(bearing(at, target));
+    pano.setPov({ pan, tilt: -5, fov: 100 });
     msg(`필지까지 약 ${Math.round(dist)}m`);
-  });
+    const pid = loc && (loc.panoId || loc.id);
+    if (pid) {
+      const url = `${NAVER_BASE}?c=19.96,0,0,2,adh&p=${encodeURIComponent(pid)},${pan},0,80,Float`;
+      document.getElementById("open").href = url;
+      console.log("[roadview] 네이버지도 거리뷰 URL", url);
+      if (AUTO_OPEN_NAVER && !stay) {
+        msg(`필지까지 약 ${Math.round(dist)}m → 네이버지도로 이동`);
+        setTimeout(() => location.replace(url), 700);
+      }
+    }
+  };
+  naver.maps.Event.addListener(pano, "init", onReady);
+  naver.maps.Event.addListener(pano, "pano_changed", onReady);
+  console.log("[roadview] 대상 좌표", lat, lng);
   naver.maps.Event.addListener(pano, "pano_status", (status) => {
-    if (status === "ERROR") { msg("근처 거리뷰 없음 → 지도"); showMap(); }
+    if (String(status).toUpperCase() !== "OK" && !done) { done = true; msg("근처 거리뷰 없음 → 지도"); showMap(); }
   });
 }
 
