@@ -45,7 +45,9 @@ const addr = `${ADDR_PREFIX} ${jb}`.trim();
 document.getElementById("title").textContent = (no ? no + ". " : "") + addr;
 const NAVER_BASE = "https://map.naver.com/p/search/" + encodeURIComponent(addr);
 document.getElementById("open").href = NAVER_BASE;
-const stay = q.get("stay") === "1";          // ?stay=1 이면 자동 이동 안 함(점검용)
+const cap = q.get("cap") === "1";            // ?cap=1 캡처용: 버튼 숨김, 자동 이동 안 함
+const stay = q.get("stay") === "1" || cap;    // ?stay=1 이면 자동 이동 안 함(점검용)
+if (cap) document.querySelector(".btns").style.display = "none";
 
 const s = document.createElement("script");
 s.src = "https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=" + NCP_KEY_ID + "&submodules=panorama,geocoder";
