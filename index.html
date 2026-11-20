@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>농지 거리뷰</title>
+<style>
+  html, body { margin: 0; height: 100%; font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; }
+  #pano, #map { position: absolute; inset: 0; }
+  #map { display: none; }
+  .bar { position: absolute; left: 0; right: 0; top: 0; z-index: 10; display: flex; align-items: center; gap: 8px;
+         padding: 10px 12px; background: rgba(32, 32, 80, .88); color: #fff; font-size: 15px; }
+  .bar b { font-size: 17px; }
+  .bar .msg { margin-left: auto; font-size: 12px; opacity: .85; }
+  .btns { position: absolute; left: 12px; right: 12px; bottom: 16px; z-index: 10; display: flex; gap: 8px; }
+  .btns a, .btns button { flex: 1; padding: 12px 8px; border: 0; border-radius: 8px; font-size: 14px; font-weight: 600;
+         text-align: center; text-decoration: none; cursor: pointer; }
+  .naver { background: #03c75a; color: #fff; }
+  .toggle { background: #fff; color: #222; box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+</style>
+</head>
+<body>
+<div class="bar"><b id="title">-</b><span class="msg" id="msg">거리뷰 찾는 중…</span></div>
+<div id="pano"></div>
+<div id="map"></div>
+<div class="btns">
+  <button class="toggle" id="toggle">지도 보기</button>
+  <a class="naver" id="open" target="_blank" rel="noopener">네이버지도에서 열기</a>
+</div>
+
+<script>
+// ===== 설정 =====
+const NCP_KEY_ID = "i5jno9udwc";   // 네이버 클라우드 Maps 애플리케이션 Client ID
+const KEY_PARAM = "ncpKeyId";                 // 예전 키(AI·NAVER API Maps)면 "ncpClientId" 로
+const ADDR_PREFIX = "경기도 광주시 추자동";
+const SEARCH_RADIUS_M = 150;                  // 이 거리 안에 거리뷰가 없으면 지도로 전환
+// ================
+
+const q = new URLSearchParams(location.search);
+const lat = parseFloat(q.get("lat")), lng = parseFloat(q.get("lng"));
+const jb = q.get("jb") || "";
+const no = q.get("no") || "";
+const addr = `${ADDR_PREFIX} ${jb}`.trim();
+document.getElementById("title").textContent = (no ? no + ". " : "") + addr;
+document.getElementById("open").href = "https://map.naver.com/p/search/" + encodeURIComponent(addr);
+
+const s = document.createElement("script");
+s.src = "https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=" + NCP_KEY_ID + "&submodules=panorama";
+s.onload = init;
+s.onerror = () => msg("네이버 지도 API를 불러오지 못했습니다(키·서비스 URL 확인)");
+document.head.appendChild(s);
+
+function msg(t) { document.getElementById("msg").textContent = t; }
+
+function bearing(a, b) {   // a→b 방위각(도)
+  const r = Math.PI / 180, y1 = a.lat() * r, y2 = b.lat() * r, dx = (b.lng() - a.lng()) * r;
+  const t = Math.atan2(Math.sin(dx) * Math.cos(y2),
+                       Math.cos(y1) * Math.sin(y2) - Math.sin(y1) * Math.cos(y2) * Math.cos(dx));
+  return (t / r + 360) % 360;
+}
+
+let map, showing = "pano";
+function showMap() {
+  document.getElementById("pano").style.display = "none";
+  document.getElementById("map").style.display = "block";
+  document.getElementById("toggle").textContent = "거리뷰 보기";
+  showing = "map";
+  if (!map) {
+    const p = new naver.maps.LatLng(lat, lng);
+    map = new naver.maps.Map("map", { center: p, zoom: 18, mapTypeId: naver.maps.MapTypeId.HYBRID });
+    new naver.maps.Marker({ position: p, map });
+  }
+}
+function showPano() {
+  document.getElementById("map").style.display = "none";
+  document.getElementById("pano").style.display = "block";
+  document.getElementById("toggle").textContent = "지도 보기";
+  showing = "pano";
+}
+document.getElementById("toggle").onclick = () => (showing === "pano" ? showMap() : showPano());
+
+function init() {
+  if (isNaN(lat) || isNaN(lng)) { msg("좌표 없음"); return; }
+  const target = new naver.maps.LatLng(lat, lng);
+  const pano = new naver.maps.Panorama("pano", {
+    position: target, pov: { pan: 0, tilt: -5, fov: 100 },
+    flightSpot: false, zoomControl: true
+  });
+  let done = false;
+  naver.maps.Event.addListener(pano, "pano_changed", () => {
+    if (done) return;
+    const loc = pano.getLocation && pano.getLocation();
+    const at = (loc && loc.coord) || pano.getPosition();
+    if (!at) return;
+    done = true;
+    const dist = distance(at, target);
+    if (dist > SEARCH_RADIUS_M) {
+      msg(`근처 거리뷰 없음(${Math.round(dist)}m) → 지도`);
+      showMap();
+      return;
+    }
+    pano.setPov({ pan: bearing(at, target), tilt: -5, fov: 100 });
+    msg(`필지까지 약 ${Math.round(dist)}m`);
+  });
+  naver.maps.Event.addListener(pano, "pano_status", (status) => {
+    if (status === "ERROR") { msg("근처 거리뷰 없음 → 지도"); showMap(); }
+  });
+  setTimeout(() => { if (!done) { msg("거리뷰 응답 없음 → 지도"); showMap(); } }, 8000);
+}
+
+function distance(a, b) {
+  const R = 6371000, r = Math.PI / 180;
+  const dLat = (b.lat() - a.lat()) * r, dLng = (b.lng() - a.lng()) * r;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat() * r) * Math.cos(b.lat() * r) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+</script>
+</body>
+</html>
