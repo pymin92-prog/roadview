@@ -46,14 +46,15 @@ document.getElementById("title").textContent = (no ? no + ". " : "") + addr;
 const NAVER_BASE = "https://map.naver.com/p/search/" + encodeURIComponent(addr);
 document.getElementById("open").href = NAVER_BASE;
 const cap = q.get("cap") === "1";            // ?cap=1 캡처용: 버튼 숨김, 자동 이동 안 함
-const stay = q.get("stay") === "1" || cap;    // ?stay=1 이면 자동 이동 안 함(점검용)
+const stay = q.get("stay") === "1";          // ?stay=1 이면 자동 이동 안 함(점검용)
 if (cap) document.querySelector(".btns").style.display = "none";
 const CAP_DELAY_MS = parseInt(q.get("delay") || "5000", 10);   // 캡처 모드: 화면 다 그려질 시간
 let readySet = false;
-function capReady() {        // 캡처 스크립트가 창 제목으로 완료를 감지
+function capReady(url) {     // 캡처 모드: 창 제목 GO 표시 후 네이버지도로 이동
   if (!cap || readySet) return;
   readySet = true;
-  setTimeout(() => { document.title = "READY " + (no || ""); }, CAP_DELAY_MS);
+  document.title = "GO " + (no || "");
+  setTimeout(() => location.replace(url || NAVER_BASE), 300);
 }
 
 const s = document.createElement("script");
@@ -150,8 +151,11 @@ function openPano() {
     const pan = Math.round(bearing(at, target));
     pano.setPov({ pan, tilt: -5, fov: 100 });
     msg(`필지까지 약 ${Math.round(dist)}m`);
-    capReady();
     const pid = loc && (loc.panoId || loc.id);
+    if (cap) {
+      capReady(pid ? `${NAVER_BASE}?c=19.96,0,0,2,adh&p=${encodeURIComponent(pid)},${pan},0,80,Float` : NAVER_BASE);
+      return;
+    }
     if (pid) {
       const url = `${NAVER_BASE}?c=19.96,0,0,2,adh&p=${encodeURIComponent(pid)},${pan},0,80,Float`;
       document.getElementById("open").href = url;
