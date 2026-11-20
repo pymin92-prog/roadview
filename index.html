@@ -48,6 +48,13 @@ document.getElementById("open").href = NAVER_BASE;
 const cap = q.get("cap") === "1";            // ?cap=1 캡처용: 버튼 숨김, 자동 이동 안 함
 const stay = q.get("stay") === "1" || cap;    // ?stay=1 이면 자동 이동 안 함(점검용)
 if (cap) document.querySelector(".btns").style.display = "none";
+const CAP_DELAY_MS = parseInt(q.get("delay") || "5000", 10);   // 캡처 모드: 화면 다 그려질 시간
+let readySet = false;
+function capReady() {        // 캡처 스크립트가 창 제목으로 완료를 감지
+  if (!cap || readySet) return;
+  readySet = true;
+  setTimeout(() => { document.title = "READY " + (no || ""); }, CAP_DELAY_MS);
+}
 
 const s = document.createElement("script");
 s.src = "https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=" + NCP_KEY_ID + "&submodules=panorama,geocoder";
@@ -71,7 +78,7 @@ document.head.appendChild(s);
 
 function msg(t) { document.getElementById("msg").textContent = t; }
 window.navermap_authFailure = () => msg("네이버 인증 실패: Client ID·Web 서비스 URL 확인");
-window.addEventListener("error", (e) => msg("오류: " + e.message));
+window.addEventListener("error", (e) => { msg("오류: " + e.message); capReady(); });
 
 function bearing(a, b) {   // a→b 방위각(도)
   const r = Math.PI / 180, y1 = a.lat() * r, y2 = b.lat() * r, dx = (b.lng() - a.lng()) * r;
@@ -82,6 +89,7 @@ function bearing(a, b) {   // a→b 방위각(도)
 
 let map, showing = "pano";
 function showMap() {
+  capReady();
   document.getElementById("pano").style.display = "none";
   document.getElementById("map").style.display = "block";
   document.getElementById("toggle").textContent = "거리뷰 보기";
@@ -108,6 +116,7 @@ function init() {
     const a = res && res.v2 && res.v2.addresses && res.v2.addresses[0];
     if (status !== naver.maps.Service.Status.OK || !a) {
       msg("주소 검색 실패 → 네이버지도에서 열기를 눌러주세요");
+      capReady();
       return;
     }
     lat = parseFloat(a.y); lng = parseFloat(a.x);
@@ -141,6 +150,7 @@ function openPano() {
     const pan = Math.round(bearing(at, target));
     pano.setPov({ pan, tilt: -5, fov: 100 });
     msg(`필지까지 약 ${Math.round(dist)}m`);
+    capReady();
     const pid = loc && (loc.panoId || loc.id);
     if (pid) {
       const url = `${NAVER_BASE}?c=19.96,0,0,2,adh&p=${encodeURIComponent(pid)},${pan},0,80,Float`;
